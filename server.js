@@ -19,7 +19,8 @@ const subscribers = {};
 // ── Routes ──────────────────────────────────────────────────
 
 // Health check
-app.get('/', (req, res) => res.json({ status: 'ok', subscribers: Object.keys(subscribers).length }));
+app.use(express.static(__dirname));
+app.get('/status', (req, res) => res.json({ status: 'ok', subscribers: Object.keys(subscribers).length }));
 
 // Expose public VAPID key to frontend
 app.get('/vapid-public-key', (req, res) => res.json({ key: VAPID_PUBLIC }));
