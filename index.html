@@ -642,15 +642,22 @@ function b64ToUint8(b64) {
   return Uint8Array.from([...b].map(c => c.charCodeAt(0)));
 }
 async function setupPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!('PushManager' in window)) { console.warn('PushManager não suportado'); return; }
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = swRegistration || await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 5000))
+    ]);
     subscription = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: b64ToUint8(VAPID_PUBLIC)
     });
+    console.log('Push subscription criada');
     syncServer();
-  } catch(e) {}
+  } catch(e) {
+    console.error('setupPush falhou:', e.message);
+    alert('Erro ao ativar push: ' + e.message);
+  }
 }
 async function syncServer() {
   if (!SERVER_URL || !subscription) return;
@@ -662,22 +669,17 @@ async function syncServer() {
   } catch(e) {}
 }
 
-// ── Service Worker ─────────────────────────────────────────
-const SW = `
-const C='eth-v1';
-self.addEventListener('install',e=>self.skipWaiting());
-self.addEventListener('activate',e=>self.clients.claim());
-self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));
-self.addEventListener('push',e=>{
-  if(!e.data)return;
-  const d=e.data.json();
-  e.waitUntil(self.registration.showNotification(d.title,{body:d.body,vibrate:[200,100,200],tag:'eth'}));
-});
-self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow('/'));});
-`;
+// ── Service Worker (arquivo real — obrigatório para Push) ───
+let swRegistration = null;
 if ('serviceWorker' in navigator) {
-  const blob = new Blob([SW], {type:'application/javascript'});
-  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
+  navigator.serviceWorker.register('./sw.js')
+    .then(reg => {
+      swRegistration = reg;
+      console.log('SW registrado:', reg.scope);
+      // Se permissão já foi dada antes, reconecta o push
+      if (Notification.permission === 'granted') setupPush();
+    })
+    .catch(err => console.error('SW falhou:', err));
 }
 
 // ── Manifest ───────────────────────────────────────────────
