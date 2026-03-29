@@ -20,6 +20,13 @@ const subscribers = {};
 
 // Health check
 app.use(express.static(__dirname));
+const path = require('path');
+
+app.get('/debug', (req, res) => {
+  const fs = require('fs');
+  const files = fs.readdirSync(__dirname);
+  res.json({ __dirname, files });
+});
 app.get('/status', (req, res) => res.json({ status: 'ok', subscribers: Object.keys(subscribers).length }));
 
 // Expose public VAPID key to frontend
