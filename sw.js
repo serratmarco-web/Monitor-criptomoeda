@@ -15,6 +15,7 @@ self.addEventListener('push', e => {
       body: d.body,
       vibrate: [200, 100, 200],
       tag: 'eth-alert',
+      icon: './icons/icon-192.png'
     })
   );
 });

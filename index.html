@@ -9,6 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ETH Monitor">
 <title>ETH Monitor</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -644,18 +646,15 @@ function b64ToUint8(b64) {
 async function setupPush() {
   if (!('PushManager' in window)) { console.warn('PushManager não suportado'); return; }
   try {
-    const reg = swRegistration || await Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 5000))
-    ]);
+    const reg = swRegistration || await navigator.serviceWorker.ready;
     subscription = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: b64ToUint8(VAPID_PUBLIC)
     });
-    console.log('Push subscription criada');
+    console.log('Push ativado com sucesso');
     syncServer();
   } catch(e) {
-    console.error('setupPush falhou:', e.message);
+    console.error('setupPush falhou:', e);
     alert('Erro ao ativar push: ' + e.message);
   }
 }
@@ -669,27 +668,19 @@ async function syncServer() {
   } catch(e) {}
 }
 
-// ── Service Worker (arquivo real — obrigatório para Push) ───
+// ── Service Worker (arquivo real) ──────────────────────────
 let swRegistration = null;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
     .then(reg => {
       swRegistration = reg;
       console.log('SW registrado:', reg.scope);
-      // Se permissão já foi dada antes, reconecta o push
       if (Notification.permission === 'granted') setupPush();
     })
     .catch(err => console.error('SW falhou:', err));
 }
 
-// ── Manifest ───────────────────────────────────────────────
-(() => {
-  const m = {name:'ETH Monitor',short_name:'ETH',start_url:'.',display:'standalone',
-    background_color:'#0d1117',theme_color:'#0d1117',lang:'pt-BR'};
-  const blob = new Blob([JSON.stringify(m)], {type:'application/json'});
-  const l = document.createElement('link'); l.rel='manifest'; l.href=URL.createObjectURL(blob);
-  document.head.appendChild(l);
-})();
+// Manifest carregado via arquivo físico manifest.json
 
 // ── Install ────────────────────────────────────────────────
 let deferredPrompt;
