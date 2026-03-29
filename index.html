@@ -351,7 +351,7 @@
 <script>
 // ── Constants ──────────────────────────────────────────────
 const VAPID_PUBLIC = 'BJrxmGfucm9YOfhnAsz43tRvqHDOwQ4Af5enWXnVWUkeoMzxFeMcGlSnvuEJAvdLPYo89N3I9roWqxXHXG3xh6U';
-const SERVER_URL   = localStorage.getItem('eth_server_url') || 'https://monitor-criptomoeda-production.up.railway.app'
+const SERVER_URL   = localStorage.getItem('eth_server_url') || 'https://monitor-criptomoeda.onrender.com'
 const CLIENT_ID    = localStorage.getItem('eth_client_id') || (() => {
   const id = 'c_' + Math.random().toString(36).slice(2) + Date.now();
   localStorage.setItem('eth_client_id', id); return id;
