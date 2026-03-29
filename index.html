@@ -218,15 +218,36 @@
     cursor: pointer; font-family: 'Inter', sans-serif;
   }
   .var-item {
-    padding: 11px 14px; border-radius: 10px;
+    padding: 13px 14px; border-radius: 10px;
     background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px;
+    display: flex; align-items: flex-start; gap: 10px;
   }
-  .var-item-price {
-    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; margin-bottom: 3px;
+  .var-item.triggered { border-color: rgba(0,229,160,0.35); }
+  .var-item.triggered-down { border-color: rgba(255,69,96,0.35); }
+  .var-item-info { flex: 1; }
+  .var-item-range {
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
+    color: var(--text); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;
   }
-  .var-item-price.pos { color: var(--green); }
-  .var-item-price.neg { color: var(--red); }
-  .var-item-meta { font-size: 11px; color: var(--muted); }
+  .var-range-low  { color: var(--red); }
+  .var-range-high { color: var(--green); }
+  .var-range-arrow { color: var(--muted); font-size: 11px; }
+  .var-item-base { font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+  .var-item-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    border-radius: 20px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .var-item-status.monitoring {
+    background: rgba(125,133,144,0.15); color: var(--muted);
+  }
+  .var-item-status.hit-up {
+    background: rgba(0,229,160,0.12); color: var(--green);
+  }
+  .var-item-status.hit-down {
+    background: rgba(255,69,96,0.12); color: var(--red);
+  }
+  .var-del { background: none; border: none; color: var(--muted2); font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: 6px; flex-shrink: 0; margin-top: 2px; }
 
   .app-footer { text-align: center; padding: 10px 16px 0; font-size: 11px; color: var(--muted2); }
 
@@ -289,9 +310,10 @@
   <div class="chart-card">
     <div class="chart-title" id="chart-title">Histórico 24h</div>
     <div class="period-tabs">
-      <button class="period-btn active" data-period="1D">Último dia</button>
-      <button class="period-btn" data-period="1M">Último mês</button>
-      <button class="period-btn" data-period="1A">Último ano</button>
+      <button class="period-btn active" data-period="1D">1 dia</button>
+      <button class="period-btn" data-period="1S">1 semana</button>
+      <button class="period-btn" data-period="1M">1 mês</button>
+      <button class="period-btn" data-period="1A">1 ano</button>
     </div>
     <div class="chart-outer">
       <div class="chart-y" id="chart-y">
@@ -330,7 +352,7 @@
       <div class="card-header-icon">⚡</div>
       <div class="card-header-title">Alertas Push por Variação</div>
     </div>
-    <div class="var-desc">Insira um valor X e selecione um alerta de preço como base. Serão criados alertas para +X e −X automaticamente.</div>
+    <div class="var-desc">Define uma faixa de variação em torno de um preço base. Você recebe um único alerta quando o preço romper a faixa — seja pra cima ou pra baixo.</div>
     <div class="var-form">
       <div class="var-input-wrap">
         <span class="var-prefix">± R$</span>
@@ -403,8 +425,8 @@ async function updatePrice() {
 }
 
 // ── Chart ──────────────────────────────────────────────────
-const PERIOD_TITLES = { '1D': 'Histórico 24h', '1M': 'Histórico 30 dias', '1A': 'Histórico 1 ano' };
-const PERIOD_DAYS   = { '1D': 1, '1M': 30, '1A': 365 };
+const PERIOD_TITLES = { '1D': 'Histórico 24h', '1S': 'Histórico 7 dias', '1M': 'Histórico 30 dias', '1A': 'Histórico 1 ano' };
+const PERIOD_DAYS   = { '1D': 1, '1S': 7, '1M': 30, '1A': 365 };
 
 async function loadChart(period) {
   document.getElementById('chart-title').textContent = PERIOD_TITLES[period];
@@ -487,6 +509,7 @@ function renderChart(period, raw) {
     const idx = Math.round(i / (lblCount-1) * (times.length-1));
     const d = new Date(times[idx]);
     if (period === '1D') return d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    if (period === '1S') return d.toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit'});
     if (period === '1M') return d.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
     return d.toLocaleDateString('pt-BR', {month:'short', year:'2-digit'});
   });
@@ -545,6 +568,7 @@ document.getElementById('add-alert-btn').addEventListener('click', () => {
 function saveVariations() {
   localStorage.setItem('eth_variations', JSON.stringify(variations));
   renderVariations();
+  syncServer();
 }
 
 function renderVarSelect() {
@@ -560,28 +584,56 @@ function renderVarSelect() {
 }
 
 function renderVariations() {
-  const c = document.getElementById('var-list');
+  const cont = document.getElementById('var-list');
   if (!variations.length) {
-    c.innerHTML = alerts.length
-      ? '<div class="empty-msg">Nenhuma variação criada ainda.</div>'
+    cont.innerHTML = alerts.length
+      ? '<div class="empty-msg">Nenhuma faixa criada ainda.</div>'
       : '<div class="empty-msg">Crie um alerta de preço primeiro para usar como base.</div>';
     return;
   }
-  c.innerHTML = variations.map(v => {
+  cont.innerHTML = variations.map((v, i) => {
+    const low  = v.basePrice - v.amount;
+    const high = v.basePrice + v.amount;
     const d    = new Date(v.baseId);
     const date = d.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}) + ' ' +
                  d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-    const meta = `Base: ${fmtBRL(v.basePrice)} · Criado em ${date}`;
-    return `
-      <div class="var-item">
-        <div class="var-item-price pos">+${fmtBRL(v.amount)}</div>
-        <div class="var-item-meta">${meta}</div>
+
+    let statusClass = 'monitoring';
+    let statusText  = '⏳ Monitorando faixa';
+    let itemClass   = '';
+
+    if (v.triggered) {
+      if (v.triggeredDir === 'above') {
+        statusClass = 'hit-up';
+        statusText  = `✅ Rompeu ${fmtBRL(v.triggeredPrice)} (acima)`;
+        itemClass   = 'triggered';
+      } else {
+        statusClass = 'hit-down';
+        statusText  = `✅ Rompeu ${fmtBRL(v.triggeredPrice)} (abaixo)`;
+        itemClass   = 'triggered-down';
+      }
+    }
+
+    return `<div class="var-item ${itemClass}">
+      <div class="var-item-info">
+        <div class="var-item-range">
+          <span class="var-range-low">${fmtBRL(low)}</span>
+          <span class="var-range-arrow">←→</span>
+          <span class="var-range-high">${fmtBRL(high)}</span>
+        </div>
+        <div class="var-item-base">Base: ${fmtBRL(v.basePrice)} · ± ${fmtBRL(v.amount)} · ${date}</div>
+        <span class="var-item-status ${statusClass}">${statusText}</span>
       </div>
-      <div class="var-item">
-        <div class="var-item-price neg">-${fmtBRL(v.amount)}</div>
-        <div class="var-item-meta">${meta}</div>
-      </div>`;
+      <button class="var-del" data-i="${i}" title="Excluir faixa">✕</button>
+    </div>`;
   }).join('');
+
+  cont.querySelectorAll('.var-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      variations.splice(+btn.dataset.i, 1);
+      saveVariations();
+    });
+  });
 }
 
 document.getElementById('add-var-btn').addEventListener('click', () => {
@@ -590,32 +642,69 @@ document.getElementById('add-var-btn').addEventListener('click', () => {
   const base   = alerts.find(a => a.id == baseId);
   if (!amount || amount <= 0) { alert('Digite um valor de variação'); return; }
   if (!base) { alert('Selecione um alerta base'); return; }
-  variations.push({ amount, baseId: base.id, basePrice: base.price });
-  alerts.push({ id: Date.now(),     price: base.price + amount, direction: 'above', triggered: false });
-  alerts.push({ id: Date.now() + 1, price: base.price - amount, direction: 'below', triggered: false });
+
+  // Armazena como faixa — um único objeto que monitora ambos os lados
+  variations.push({
+    id: Date.now(),
+    amount,
+    baseId: base.id,
+    basePrice: base.price,
+    triggered: false,
+    triggeredDir: null,
+    triggeredPrice: null
+  });
+
   document.getElementById('var-amount-input').value = '';
-  saveAlerts(); saveVariations();
+  saveVariations();
 });
 
 // ── Alert Check ────────────────────────────────────────────
 function checkAlerts(price) {
-  let changed = false;
+  let alertChanged = false;
+  let varChanged   = false;
+
+  // Verifica alertas simples de preço
   alerts.forEach(a => {
     if (a.triggered) return;
     const hit = (a.direction === 'above' && price >= a.price) ||
                 (a.direction === 'below' && price <= a.price);
     if (hit) {
-      a.triggered = true; changed = true;
+      a.triggered = true; alertChanged = true;
       if (Notification.permission === 'granted') {
         const label = a.direction === 'above' ? 'acima de' : 'abaixo de';
         new Notification('🚨 ETH Alerta!', {
           body: `Ethereum ${fmtBRL(price)} — ${label} ${fmtBRL(a.price)}`,
-          tag: 'eth-' + a.id
+          tag: 'eth-alert-' + a.id
         });
       }
     }
   });
-  if (changed) saveAlerts();
+
+  // Verifica faixas de variação — dispara no primeiro lado rompido
+  variations.forEach(v => {
+    if (v.triggered) return;
+    const low  = v.basePrice - v.amount;
+    const high = v.basePrice + v.amount;
+    const hitUp   = price >= high;
+    const hitDown = price <= low;
+    if (hitUp || hitDown) {
+      v.triggered      = true;
+      v.triggeredDir   = hitUp ? 'above' : 'below';
+      v.triggeredPrice = price;
+      varChanged = true;
+      if (Notification.permission === 'granted') {
+        const dir   = hitUp ? '📈 acima' : '📉 abaixo';
+        const limit = hitUp ? fmtBRL(high) : fmtBRL(low);
+        new Notification('🚨 ETH Faixa rompida!', {
+          body: `Ethereum ${fmtBRL(price)} — saiu ${dir} da faixa (limite: ${limit})`,
+          tag: 'eth-var-' + v.id
+        });
+      }
+    }
+  });
+
+  if (alertChanged) saveAlerts();
+  if (varChanged)   saveVariations();
 }
 
 // ── Notifications ──────────────────────────────────────────
@@ -663,7 +752,7 @@ async function syncServer() {
   try {
     await fetch(SERVER_URL + '/subscribe', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ subscription, clientId: CLIENT_ID, alerts })
+      body: JSON.stringify({ subscription, clientId: CLIENT_ID, alerts, variations })
     });
   } catch(e) {}
 }
