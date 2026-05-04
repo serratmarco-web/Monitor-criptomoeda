@@ -25,18 +25,25 @@ app.get('/', (req, res) => res.json({
 
 app.get('/vapid-public-key', (req, res) => res.json({ key: VAPID_PUBLIC }));
 
+// FIX 1: Aceita alerts E variations no /subscribe
 app.post('/subscribe', (req, res) => {
-  const { subscription, clientId, alerts } = req.body;
+  const { subscription, clientId, alerts, variations } = req.body;
   if (!subscription || !clientId) return res.status(400).json({ error: 'Missing fields' });
-  subscribers[clientId] = { subscription, alerts: alerts || [] };
-  console.log(`[+] Subscribed: ${clientId} | Alerts: ${alerts?.length || 0}`);
+  subscribers[clientId] = {
+    subscription,
+    alerts: alerts || [],
+    variations: variations || []   // ← antes era ignorado
+  };
+  console.log(`[+] Subscribed: ${clientId} | Alerts: ${alerts?.length || 0} | Variations: ${variations?.length || 0}`);
   res.json({ ok: true });
 });
 
+// FIX 2: /update-alerts também salva variations
 app.post('/update-alerts', (req, res) => {
-  const { clientId, alerts } = req.body;
+  const { clientId, alerts, variations } = req.body;
   if (!subscribers[clientId]) return res.status(404).json({ error: 'Not found' });
-  subscribers[clientId].alerts = alerts;
+  subscribers[clientId].alerts     = alerts     || subscribers[clientId].alerts;
+  subscribers[clientId].variations = variations || subscribers[clientId].variations;
   res.json({ ok: true });
 });
 
@@ -61,6 +68,10 @@ async function fetchETHPrice() {
   }
 }
 
+async function sendPush(subscription, payload) {
+  await webpush.sendNotification(subscription, JSON.stringify(payload));
+}
+
 async function checkAndNotify() {
   const price = await fetchETHPrice();
   if (!price) return;
@@ -70,7 +81,9 @@ async function checkAndNotify() {
   console.log(`[ETH] R$ ${price.toLocaleString('pt-BR')} ${prev ? `(antes: R$ ${prev.toLocaleString('pt-BR')})` : '(primeiro fetch)'}`);
 
   for (const [clientId, data] of Object.entries(subscribers)) {
-    for (const alert of data.alerts) {
+
+    // ── Alertas simples ──────────────────────────────────────
+    for (const alert of (data.alerts || [])) {
       if (alert.triggered) continue;
 
       const hit =
@@ -80,19 +93,53 @@ async function checkAndNotify() {
       if (!hit) continue;
 
       const dirLabel = alert.direction === 'above' ? 'acima de' : 'abaixo de';
-      const payload  = JSON.stringify({
+      const payload  = {
         title: `🚨 ETH ${alert.direction === 'above' ? '📈' : '📉'} Alerta atingido!`,
         body:  `Ethereum R$ ${price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} — ${dirLabel} R$ ${alert.price.toLocaleString('pt-BR')}`,
         price, alertPrice: alert.price, direction: alert.direction, timestamp: Date.now()
-      });
+      };
 
       try {
-        await webpush.sendNotification(data.subscription, payload);
+        await sendPush(data.subscription, payload);
         alert.triggered = true;
-        console.log(`[PUSH] Enviado para ${clientId}: ETH R$ ${price}`);
+        console.log(`[PUSH] Alerta simples → ${clientId}: ETH R$ ${price}`);
       } catch (e) {
-        console.error(`[PUSH] Falhou para ${clientId}:`, e.message);
-        if (e.statusCode === 410) delete subscribers[clientId];
+        console.error(`[PUSH] Falhou (alerta) para ${clientId}:`, e.message);
+        if (e.statusCode === 410) { delete subscribers[clientId]; break; }
+      }
+    }
+
+    if (!subscribers[clientId]) continue; // foi removido acima
+
+    // FIX 3: Processa variations no servidor (antes era ignorado)
+    for (const v of (data.variations || [])) {
+      if (v.triggered) continue;
+
+      const low    = v.basePrice - v.amount;
+      const high   = v.basePrice + v.amount;
+      const hitUp  = price >= high;
+      const hitDown = price <= low;
+
+      if (!hitUp && !hitDown) continue;
+
+      const dir     = hitUp ? 'acima' : 'abaixo';
+      const dirIcon = hitUp ? '📈' : '📉';
+      const limit   = hitUp ? high : low;
+      const payload = {
+        title: `🚨 ETH ${dirIcon} Faixa rompida!`,
+        body:  `Ethereum R$ ${price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} — saiu ${dir} da faixa (limite: R$ ${limit.toLocaleString('pt-BR')})`,
+        price, basePrice: v.basePrice, amount: v.amount, direction: hitUp ? 'above' : 'below', timestamp: Date.now()
+      };
+
+      try {
+        await sendPush(data.subscription, payload);
+        v.triggered      = true;
+        v.triggeredDir   = hitUp ? 'above' : 'below';
+        v.triggeredPrice = price;
+        console.log(`[PUSH] Variação → ${clientId}: ETH R$ ${price} rompeu faixa ±${v.amount}`);
+      } catch (e) {
+        console.error(`[PUSH] Falhou (variação) para ${clientId}:`, e.message);
+        if (e.statusCode === 410) { delete subscribers[clientId]; break; }
       }
     }
   }
@@ -103,8 +150,6 @@ setInterval(checkAndNotify, 2 * 60 * 1000);
 checkAndNotify();
 
 // ── Self-ping para não dormir no Render free ─────────────────
-// O Render free dorme após 15 min sem requisição HTTP.
-// Este ping bate na própria URL a cada 14 min para manter acordado.
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 if (RENDER_URL) {
   setInterval(async () => {
@@ -114,7 +159,7 @@ if (RENDER_URL) {
     } catch (e) {
       console.warn('[PING] Self-ping falhou:', e.message);
     }
-  }, 14 * 60 * 1000); // a cada 14 minutos
+  }, 14 * 60 * 1000);
   console.log(`[PING] Self-ping ativado para ${RENDER_URL}`);
 } else {
   console.log('[PING] RENDER_EXTERNAL_URL não definida — self-ping desativado');
